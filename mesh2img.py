@@ -20,6 +20,7 @@ from bpy import context, data, ops
 import argparse
 from datetime import datetime
 import logging
+import math
 import os
 import sys
 
@@ -70,7 +71,7 @@ class Mesh2Img(object):
         :param output_template: output image file name pattern (where they'll go and how they're named)
         :param max_dim: the maximum length of any axis of the mesh (the mesh will be scaled up/down to this)
         :param camera_coords: an (X, Y, Z) tuple to define where the camera should be positioned
-        :param camera_rotation: an (X, Y, Z) tuple to define the rotation of the camera in radians
+        :param camera_rotation: an (X, Y, Z) tuple to define the rotation of the camera in degrees
         :param jpeg_quality: if JPEG is the output format, this determines the quality of the compression (1-100)
         """
         if paths is not None:
@@ -249,7 +250,7 @@ class Mesh2Img(object):
         parser.add_argument('-c', '--camera-coords', default='0.0,0.0,10.0', type=str,
                             help="Where to position the camera. X,Y,Z separated by commas.")
         parser.add_argument('-r', '--camera-rotation', default='0.0,0.0,0.0', type=str,
-                            help='The rotation of the camera in radians for X,Y,Z.')
+                            help='The rotation of the camera in degrees for X,Y,Z.')
         args = parser.parse_args(sys.argv[index:]).__dict__
 
         # we're going to fix up the dimensions list real quick
@@ -397,6 +398,10 @@ def delete_object_by_name(name, ignore_errors=False):
     obj.select = True
     status = ops.object.delete()
     success = 'FINISHED' in status
+    if success:
+        logging.debug("Successfully deleted '%s'", name)
+    else:
+        logging.debug("'%s' couldn't be deleted. Status was: %s", name, status)
     return success
 
 
@@ -430,14 +435,16 @@ def set_camera(x=0, y=0, z=10, rotation_x=0, rotation_y=0, rotation_z=0, camera_
     :param x: the X position of the camera
     :param y: the Y position of the camera
     :param z: the Z position of the camera
-    :param rotation_x: the X rotation of the camera in radians
-    :param rotation_y: the Y rotation of the camera in radians
-    :param rotation_z: the Z rotation of the camera in radians
+    :param rotation_x: the X rotation of the camera in degrees
+    :param rotation_y: the Y rotation of the camera in degrees
+    :param rotation_z: the Z rotation of the camera in degrees
     :param camera_name: the name of the camera object to be moved
     """
     camera = data.objects[camera_name]
     camera.location = (x, y, z)
-    camera.rotation_euler = (rotation_x, rotation_y, rotation_z)
+    # convert the angles given into radians because that's what Blender operates on
+    rx, ry, rz = math.radians(rotation_x), math.radians(rotation_y), math.radians(rotation_z)
+    camera.rotation_euler = (rx, ry, rz)
 
 
 if __name__ == "__main__":  # start execution here
