@@ -56,8 +56,8 @@ class Mesh2Img(object):
         '.ply': ops.import_mesh.ply,
     }
 
-    def __init__(self, paths=None, dimensions=None, image_format=None, output_template=DEFAULT_OUTPUT_TEMPLATE,
-                 max_dim=9.0, camera_coords=DEFAULT_CAMERA_COORDS,
+    def __init__(self, paths=None, dimensions=None, image_format=None, verbose=False,
+                 output_template=DEFAULT_OUTPUT_TEMPLATE, max_dim=9.0, camera_coords=DEFAULT_CAMERA_COORDS,
                  camera_rotation=DEFAULT_CAMERA_ROTATION, jpeg_quality=80):
         """
         Creates a new batch job. Does not start processing paths until you call .start(). You don't have to pass
@@ -80,6 +80,7 @@ class Mesh2Img(object):
             paths = []
         self.filepaths = paths
         self._job_templates = []
+        self.verbose = self._verbose = bool(verbose)
         self.max_dim = max_dim
         self.camera_coords = camera_coords
         self.camera_rotation = camera_rotation
@@ -88,6 +89,18 @@ class Mesh2Img(object):
             for d in dimensions:
                 self.add_job_template(d, output_template=output_template, image_format=image_format,
                                       jpeg_quality=jpeg_quality)
+
+    @property
+    def verbose(self):
+        return self._verbose
+
+    @verbose.setter
+    def verbose(self, value):
+        self._verbose = bool(value)
+        if value:
+            logging.getLogger().setLevel(logging.DEBUG)
+        else:
+            logging.getLogger().setLevel(logging.WARNING)
 
     def add_job_template(self, dimensions, output_template=DEFAULT_OUTPUT_TEMPLATE, image_format='png',
                          jpeg_quality=80):
@@ -100,6 +113,7 @@ class Mesh2Img(object):
 
         See also JobTemplate.__init__
         """
+        logging.debug("Adding job template as %s" % locals())
         self._job_templates.append(JobTemplate(dimensions, output_template, image_format, jpeg_quality=jpeg_quality))
 
     @classmethod
@@ -112,6 +126,7 @@ class Mesh2Img(object):
         :param filepath: the path to the mesh file
         :return: the object representing the newly imported mesh
         """
+        logging.info("Opening mesh from %s" % filepath)
         ext = os.path.splitext(filepath)[1].lower()
         cls.MESH_TYPES[ext](filepath=filepath)  # calls the function associated with this extension
         mesh = context.selected_objects[0]
@@ -143,14 +158,13 @@ class Mesh2Img(object):
 
     def _process_dir(self, filepath):
         """
-        Given the path to a folder, recursively enters each directory in the tree to process every known mesh file
-        defined in MESH_TYPES
+        Given the path to a folder, recursively enters each directory in the tree to process every mesh file defined
+        in MESH_TYPES.
 
-        :param filepath:
-
-        :return:
+        :param filepath: a full path to the directory to recurse through
         """
         for folder, subfolders, filenames in os.walk(filepath):  # recurse directory
+            logging.debug("Entering %s", folder)
             for filename in filenames:  # for each file in this directory
                 ext = os.path.splitext(filename)[1].lower()
                 if ext in self.MESH_TYPES:  # if this is a known mesh file type
@@ -168,6 +182,7 @@ class Mesh2Img(object):
         scale_mesh(mesh, max_dim=self.max_dim)
 
         for jt in self._job_templates:
+            logging.debug("Applying %s to %s", jt, filepath)
             output_path = jt.get_output_path(filepath, exec_time=self.execute_time)
             self.save_image(output_path, width=jt.width, height=jt.height, file_format=jt.image_format,
                             jpeg_quality=jt.jpeg_quality)
@@ -213,6 +228,8 @@ class Mesh2Img(object):
                             help='The path(s) to the mesh file(s). If a directory is given, all PLY and STL files in '
                                  'the entire directory tree are processed. A mixed list of file paths and folder paths '
                                  'can be given.')
+        parser.add_argument('-v', '--verbose', action='store_true',
+                            help="See more output logging to the command line.")
         parser.add_argument('-i', '--image-format', default='png', choices=cls.IMAGE_FORMATS.keys(), type=str,
                             help="Specify what image format to output as.")
         parser.add_argument('--jpeg-quality', default=80, type=int,
@@ -278,6 +295,8 @@ class Mesh2Img(object):
         :param watermark_background: the color to put behind the text of the watermark. This should be a tuple
                                      of the form: (Red, Green, Blue, Opacity)
         """
+        logging.info("Saving image %s", filepath)
+        logging.debug("... with arguments: %s" % str(locals()))
         render = data.scenes['Scene'].render
         render.filepath = filepath
         if antialiasing_samples:
@@ -353,6 +372,9 @@ class JobTemplate(object):
         return self.output_template.format(basename=basename, date=date, exec_time=exec_time, ext=ext,
                                            filepath=filepath, height=self.height, src_ext=src_ext, width=self.width)
 
+    def __str__(self):
+        return "JobTemplate(%s)" % str(self.__dict__)
+
 
 def delete_object_by_name(name, ignore_errors=False):
     """
@@ -364,9 +386,11 @@ def delete_object_by_name(name, ignore_errors=False):
     :return: True if the object was found and deleted successfully
     """
     try:
+        logging.debug("Attempting to delete object '%s'" % name)
         obj = data.objects[name]
     except KeyError as ex:
         if ignore_errors:  # are we ignoring errors?
+            logging.debug("Didn't delete '%s'. Probably didn't exist. Error ignored." % name)
             return False  # just report that we weren't successful
         raise ex  # object doesn't exist so raise this exception
     ops.object.select_all(action='DESELECT')
@@ -386,12 +410,17 @@ def scale_mesh(mesh, max_dim=9.0):
     :param mesh: the object to scale to be exactly `max_dim` units at it's longest side
     :param max_dim: the limit to how big an object can be on any axis
     """
+    logging.debug("Scaling mesh %s to a maximum of %s in any direction" % (mesh.name, max_dim))
     max_length = max(mesh.dimensions)
     if max_length == 0:
         logging.debug("No scaling for %s because its dimensions are %s" % (mesh.name, repr(mesh.dimensions)))
         return  # skip scaling
     scale_factor = 1 / (max_length / max_dim)
     mesh.scale = (scale_factor, scale_factor, scale_factor)
+    x, y, z = [i for i in mesh.dimensions]  # for pretty dimension formatting
+    new_dimensions = "X=%s, Y=%s, Z=%s" % (x, y, z)
+    logging.debug("Scale factor for mesh %s is %s. Its new dimensions are %s",
+                  mesh.name, scale_factor, [i for i in new_dimensions])
 
 
 def set_camera(x=0, y=0, z=10, rotation_x=0, rotation_y=0, rotation_z=0, camera_name='Camera'):
@@ -412,5 +441,7 @@ def set_camera(x=0, y=0, z=10, rotation_x=0, rotation_y=0, rotation_z=0, camera_
 
 
 if __name__ == "__main__":  # start execution here
+    old_level = logging.getLogger().level
     cliargs = Mesh2Img.command_line()
     Mesh2Img(**cliargs).start()  # pass in all the paths given on the command line
+    logging.getLogger().setLevel(old_level)
