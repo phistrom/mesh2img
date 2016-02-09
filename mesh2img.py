@@ -57,7 +57,7 @@ class Mesh2Img(object):
         '.ply': ops.import_mesh.ply,
     }
 
-    def __init__(self, paths=None, dimensions=None, image_format=None, verbose=False,
+    def __init__(self, paths=None, dimensions=None, material=None, image_format=None, verbose=False,
                  output_template=DEFAULT_OUTPUT_TEMPLATE, max_dim=9.0, camera_coords=DEFAULT_CAMERA_COORDS,
                  camera_rotation=DEFAULT_CAMERA_ROTATION, jpeg_quality=80):
         """
@@ -67,6 +67,7 @@ class Mesh2Img(object):
 
         :param paths: paths to directories containing mesh files or the paths to the files themselves
         :param dimensions: a list of (width, height) tuples to specify image sizes to generate
+        :param material: the material name as a string to apply to the imported mesh
         :param image_format: the output format for all output images. For finer control, use add_job_template instead
         :param output_template: output image file name pattern (where they'll go and how they're named)
         :param max_dim: the maximum length of any axis of the mesh (the mesh will be scaled up/down to this)
@@ -80,6 +81,7 @@ class Mesh2Img(object):
         else:
             paths = []
         self.filepaths = paths
+        self.materials = [mat_name.strip() for mat_name in material.split(',')]
         self._job_templates = []
         self.verbose = self._verbose = bool(verbose)
         self.max_dim = max_dim
@@ -181,6 +183,8 @@ class Mesh2Img(object):
         """
         mesh = self.open_mesh(filepath)
         scale_mesh(mesh, max_dim=self.max_dim)
+        if self.materials:
+            self._apply_material(mesh, self.materials)
 
         for jt in self._job_templates:
             logging.debug("Applying %s to %s", jt, filepath)
@@ -189,6 +193,30 @@ class Mesh2Img(object):
                             jpeg_quality=jt.jpeg_quality)
         if not leave_mesh_open:
             self._delete_mesh(mesh)
+
+    @staticmethod
+    def _apply_material(mesh, material_names):
+        """
+        Given (a) material name(s) and an object, clears all the materials already on the object and applies just the one
+        material given by name.
+
+        :param mesh: the object to apply one or more materials too. Its existing materials will be removed.
+        :param material_name: the name or names of materials you want applied to the object (in order of application).
+                              This can be a string of a single material name or a collection of names.
+        """
+        if isinstance(material_names, str):
+            material_names = [material_names]
+        materials = []
+        for material_name in material_names:
+            try:
+                material = data.materials[material_name]
+                materials.append(material)
+            except KeyError:
+                raise ValueError("The material name '%s' was not found.", material_name)
+        # all the materials were successfully found so now we will claer the object's existing material
+        mesh.data.materials.clear()
+        for material in materials:
+            mesh.data.materials.append(material)
 
     @staticmethod
     def _delete_mesh(mesh):
@@ -243,7 +271,7 @@ class Mesh2Img(object):
                                  " {filepath} (the full path of the input file except the extension), {height} (height "
                                  "of the output image in pixels), {src_ext} (the extension of the input file), "
                                  "{width} (width of the output image in pixels)")
-        parser.add_argument('-m', '--max-dim', default=9.0, type=float,
+        parser.add_argument('-x', '--max-dim', default=9.0, type=float,
                             help="Limit the size of the mesh to not exceed this length on any axis. Setting it too "
                                  "high will make it too large to fit in the image. Setting it too low will leave a lot "
                                  "of empty margin in the image.")
@@ -251,6 +279,10 @@ class Mesh2Img(object):
                             help="Where to position the camera. X,Y,Z separated by commas.")
         parser.add_argument('-r', '--camera-rotation', default='0.0,0.0,0.0', type=str,
                             help='The rotation of the camera in degrees for X,Y,Z.')
+        parser.add_argument('-m', '--material', type=str,
+                            help="One or more names of materials to apply to the mesh before rendering. "
+                                 "Material must exist in your default scene already. Separate names by comma.")
+
         args = parser.parse_args(sys.argv[index:]).__dict__
 
         # we're going to fix up the dimensions list real quick

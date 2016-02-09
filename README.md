@@ -36,6 +36,11 @@ blender -b -P mesh2img.py -- --paths /all/my/meshes_folder --dimensions 200
 blender -b -P mesh2img.py -- --paths /some/mesh/file.stl --dimensions 200 800,600 2048 -i jpg
 ```
 
+#### Convert a single mesh file to a 300x300 PNG and apply a material named "gold"
+```sh
+blender -b -P mesh2img.py -- --paths /some/mesh/file.stl --dimensions 300 -m gold
+```
+
 #### Convert 2 folders into 200x200 PNGs that go into one output folder by date/time the program ran
 ```sh
 blender -b -P mesh2img.py -- --paths /half/my/meshes "/other/meshes folder" \
