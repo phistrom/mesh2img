@@ -14,15 +14,17 @@ script on the command line as-is. I've tried to comment this script to be easy t
 :license:   MIT
 
 """
+#to run the program for now type "blender -b -P mesh2img.py -- --paths C:\first_try --dimensions 1080 -x 7" in the cmd
 
 from bpy import context, data, ops
-
+import bpy
 import argparse
 from datetime import datetime
 import logging
 import math
 import os
 import sys
+
 
 # some default colors for adding a stamp to your render (Red, Green, Blue, Opacity)
 WATERMARK_WHITE = (255, 255, 255, 1)
@@ -53,12 +55,13 @@ class Mesh2Img(object):
     }
     MESH_TYPES = {
         # here are the functions that open the given file extensions
-        '.stl': ops.import_mesh.stl,
-        '.ply': ops.import_mesh.ply,
+        '.stl': bpy.ops.import_mesh.stl,    #ops.import_mesh.stl if it doesn't work for some reason replace them with this
+        '.ply': bpy.ops.import_mesh.ply,    #ops.import_mesh.ply
     }
 
-    def __init__(self, paths=None, dimensions=None, material=None, image_format=None, verbose=False,
-                 output_template=DEFAULT_OUTPUT_TEMPLATE, max_dim=9.0, camera_coords=DEFAULT_CAMERA_COORDS,
+#when your ready to put the material paramter put this below 'material=None'.
+    def __init__(self, paths=None, dimensions=None, image_format=None, verbose=False,
+                 output_template=DEFAULT_OUTPUT_TEMPLATE, max_dim=7.0, camera_coords=DEFAULT_CAMERA_COORDS,
                  camera_rotation=DEFAULT_CAMERA_ROTATION, jpeg_quality=80):
         """
         Creates a new batch job. Does not start processing paths until you call .start(). You don't have to pass
@@ -81,7 +84,7 @@ class Mesh2Img(object):
         else:
             paths = []
         self.filepaths = paths
-        self.materials = [mat_name.strip() for mat_name in material.split(',')]
+        #self.materials = [mat_name.strip() for mat_name in material.split(',')]
         self._job_templates = []
         self.verbose = self._verbose = bool(verbose)
         self.max_dim = max_dim
@@ -129,12 +132,16 @@ class Mesh2Img(object):
         :param filepath: the path to the mesh file
         :return: the object representing the newly imported mesh
         """
+        print(filepath)
         logging.info("Opening mesh from %s" % filepath)
         ext = os.path.splitext(filepath)[1].lower()
+
         cls.MESH_TYPES[ext](filepath=filepath)  # calls the function associated with this extension
         mesh = context.selected_objects[0]
-        ops.object.select_all(action='DESELECT')  # deselect EVERYTHING
-        mesh.select = True  # ok now just select our mesh
+        for obj in bpy.context.selected_objects:   # deselect EVERYTHING
+            obj.select_set(False)
+        mesh.select_set(state=True)  # ok now just select our mesh
+        bpy.context.view_layer.objects.active = mesh
         ops.object.origin_set(type='GEOMETRY_ORIGIN')  # center the mesh at the origin point
         return mesh
 
@@ -183,8 +190,8 @@ class Mesh2Img(object):
         """
         mesh = self.open_mesh(filepath)
         scale_mesh(mesh, max_dim=self.max_dim)
-        if self.materials:
-            self._apply_material(mesh, self.materials)
+        #if self.materials:
+            #self._apply_material(mesh, self.materials)
 
         for jt in self._job_templates:
             logging.debug("Applying %s to %s", jt, filepath)
@@ -194,44 +201,18 @@ class Mesh2Img(object):
         if not leave_mesh_open:
             self._delete_mesh(mesh)
 
-    @staticmethod
-    def _apply_material(mesh, material_names):
-        """
-        Given (a) material name(s) and an object, clears all the materials already on the object and applies just the one
-        material given by name.
-
-        :param mesh: the object to apply one or more materials too. Its existing materials will be removed.
-        :param material_name: the name or names of materials you want applied to the object (in order of application).
-                              This can be a string of a single material name or a collection of names.
-        """
-        if isinstance(material_names, str):
-            material_names = [material_names]
-        materials = []
-        for material_name in material_names:
-            try:
-                material = data.materials[material_name]
-                materials.append(material)
-            except KeyError:
-                raise ValueError("The material name '%s' was not found.", material_name)
-        # all the materials were successfully found so now we will claer the object's existing material
-        mesh.data.materials.clear()
-        for material in materials:
-            mesh.data.materials.append(material)
 
     @staticmethod
     def _delete_mesh(mesh):
         """
-        Given a Blender object, removes it from the scene. An Exception is raised if the object given cannot be
-        removed.
-
+        Given a Blender object, removes it from the scene.
         :param mesh: the Blender object
         """
         name = mesh.name
-        ops.object.select_all(action='DESELECT')
-        mesh.select = True
-        status = ops.object.delete()
-        if 'FINISHED' not in status:
-            raise Exception("Failed to delete mesh %s." % name)
+        print(name)
+        print(ops.object)
+        delete_object_by_name(name)
+
 
     @classmethod
     def command_line(cls):
@@ -279,9 +260,9 @@ class Mesh2Img(object):
                             help="Where to position the camera. X,Y,Z separated by commas.")
         parser.add_argument('-r', '--camera-rotation', default='0.0,0.0,0.0', type=str,
                             help='The rotation of the camera in degrees for X,Y,Z.')
-        parser.add_argument('-m', '--material', type=str,
-                            help="One or more names of materials to apply to the mesh before rendering. "
-                                 "Material must exist in your default scene already. Separate names by comma.")
+        #parser.add_argument('-m', '--material', type=str,
+                            #help="One or more names of materials to apply to the mesh before rendering. "
+                                 #"Material must exist in your default scene already. Separate names by comma.")
 
         args = parser.parse_args(sys.argv[index:]).__dict__
 
@@ -332,11 +313,6 @@ class Mesh2Img(object):
         logging.debug("... with arguments: %s" % str(locals()))
         render = data.scenes['Scene'].render
         render.filepath = filepath
-        if antialiasing_samples:
-            render.use_antialiasing = True
-            render.antialiasing_samples = str(antialiasing_samples)
-        else:
-            render.use_antialiasing = False
         render.resolution_percentage = resolution_percentage
         render.resolution_x = width
         render.resolution_y = height if height is not None else width
@@ -427,14 +403,10 @@ def delete_object_by_name(name, ignore_errors=False):
             return False  # just report that we weren't successful
         raise ex  # object doesn't exist so raise this exception
     ops.object.select_all(action='DESELECT')
-    obj.select = True
-    status = ops.object.delete()
-    success = 'FINISHED' in status
-    if success:
-        logging.debug("Successfully deleted '%s'", name)
-    else:
-        logging.debug("'%s' couldn't be deleted. Status was: %s", name, status)
-    return success
+    obj.select_set(state=True)
+    context.view_layer.objects.active = obj
+    bpy.ops.object.delete()
+
 
 
 def scale_mesh(mesh, max_dim=9.0):
@@ -449,6 +421,7 @@ def scale_mesh(mesh, max_dim=9.0):
     """
     logging.debug("Scaling mesh %s to a maximum of %s in any direction" % (mesh.name, max_dim))
     max_length = max(mesh.dimensions)
+    print('=================================================',max_length)
     if max_length == 0:
         logging.debug("No scaling for %s because its dimensions are %s" % (mesh.name, repr(mesh.dimensions)))
         return  # skip scaling
@@ -463,7 +436,6 @@ def scale_mesh(mesh, max_dim=9.0):
 def set_camera(x=0, y=0, z=10, rotation_x=0, rotation_y=0, rotation_z=0, camera_name='Camera'):
     """
     Sets the camera named by `camera_name` to the given coordinates.
-
     :param x: the X position of the camera
     :param y: the Y position of the camera
     :param z: the Z position of the camera
@@ -478,6 +450,14 @@ def set_camera(x=0, y=0, z=10, rotation_x=0, rotation_y=0, rotation_z=0, camera_
     rx, ry, rz = math.radians(rotation_x), math.radians(rotation_y), math.radians(rotation_z)
     camera.rotation_euler = (rx, ry, rz)
 
+def size_object(object):
+    object.select_set(state=True)
+    bpy.context.view_layer.objects.active = object
+    x, y, z = bpy.context.active_object.dimensions
+    return x, y, z
+
+def distance(p1, p2):
+    return sqrt((p1[0]-p2[0])**2+(p1[1]-p2[1])**2+(p1[2]-p2[2])**2)
 
 if __name__ == "__main__":  # start execution here
     old_level = logging.getLogger().level
